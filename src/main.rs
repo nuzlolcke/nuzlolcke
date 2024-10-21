@@ -16,6 +16,7 @@ async fn main() {
         start_date: Local.with_ymd_and_hms(2024, 10, 1, 0, 0, 0).unwrap(),
         end_date: Local::now(),
     });
+
     let api_key = std::env::var("RGAPI_KEY").expect("RGAPI_KEY is not set in the environment");
     let game_name = std::env::var("NUZLOLCKE_GAME_NAME")
         .expect("NUZLOLCKE_GAME_NAME is not set in the environment");
@@ -24,16 +25,12 @@ async fn main() {
     let api = RiotApi::new(api_key);
     let puuid = get_summoner_puuid(&api, &game_name, &tag_line)
         .await
-        .expect("Can't find summoner Rowen Lemmings#NA1");
-    let champions_with_losses = get_champion_losses_in_date_range(
-        &api,
-        &puuid,
-        config.start_date,
-        config.end_date,
-    )
-    .await;
+        .or_else(|| panic!("Can't find summoner {}#{}", game_name, tag_line))
+        .unwrap();
+    let loss_results =
+        get_champion_losses_in_date_range(&api, &puuid, config.start_date, config.end_date).await;
 
-    for result in champions_with_losses.into_iter() {
+    for result in loss_results.into_iter() {
         println!(
             "LOSS:\n\tChampion: {}\tDate: {}\tMatchID: {}",
             result.champion.name().unwrap(),
@@ -69,14 +66,14 @@ async fn get_champion_losses_in_date_range(
         .platform_route
         .to_regional();
     let mut match_ids: Vec<String> = Vec::new();
-    let mut i = 1;
+    let mut i = 0;
     loop {
         let matches = api
             .match_v5()
             .get_match_ids_by_puuid(
                 platform_route,
                 puuid,
-                Some(100),
+                None,
                 Some(to.timestamp()),
                 None,
                 Some(from.timestamp()),
