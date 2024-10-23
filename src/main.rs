@@ -1,9 +1,11 @@
-use riven::consts::{Champion, PlatformRoute};
+use riven::consts::{Champion, GameType, Map, PlatformRoute};
 use riven::RiotApi;
 
 use std::sync::OnceLock;
 
 use futures::{stream, StreamExt};
+
+use std::collections::HashSet;
 
 use chrono::{prelude::*, Local, TimeZone};
 
@@ -30,13 +32,23 @@ async fn main() {
     let loss_results =
         get_champion_losses_in_date_range(&api, &puuid, config.start_date, config.end_date).await;
 
-    for result in loss_results.into_iter() {
-        println!(
-            "LOSS:\n\tChampion: {}\tDate: {}\tMatchID: {}",
-            result.champion.name().unwrap(),
-            result.date.to_rfc2822(),
-            result.match_id
-        );
+    let champions_with_losses: Vec<Champion> = loss_results
+        .iter()
+        .map(|result| result.champion)
+        .fold(
+            (Vec::<Champion>::new(), HashSet::<Champion>::new()),
+            |(mut champions, mut seen), champion| {
+                if !seen.contains(&champion) {
+                    seen.insert(champion);
+                    champions.push(champion);
+                }
+                (champions, seen)
+            },
+        )
+        .0;
+
+    for champion in champions_with_losses {
+        println!("{}", champion.name().unwrap_or("UNKNOWN"));
     }
 }
 
@@ -107,7 +119,15 @@ async fn get_champion_losses_in_date_range(
                 .teams
                 .iter()
                 .find(|team| team.team_id == participant.team_id)?;
-            if !participant_team.win {
+            if !participant_team.win
+                && matches!(match_data.info.game_type, Some(GameType::MATCHED_GAME))
+                && matches!(
+                    match_data.info.map_id,
+                    Map::SUMMONERS_RIFT
+                        | Map::SUMMONERS_RIFT_ORIGINAL_SUMMER_VARIANT
+                        | Map::SUMMONERS_RIFT_ORIGINAL_AUTUMN_VARIANT
+                )
+            {
                 Some(LossResult {
                     champion: participant.champion().ok()?,
                     date: Utc
